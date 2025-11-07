@@ -36,8 +36,65 @@ class SentilBackend:
             raise Exception("Database connection failed")
     
     def process_queue(self):
-        # ... (same as before)
-
+"""Main method to process queued items"""
+        logger.info("Starting queue processing...")
+        
+        # Get queued items
+        queued_items = self.db.get_queued_items(self.processing_batch_size)
+        
+        if not queued_items:
+            logger.info("No items in queue")
+            return 0
+        
+        processed_count = 0
+        
+        for item in queued_items:
+            try:
+                logger.info(f"Processing item {item['queue_id']} for user {item['user_id']}")
+                
+                # Acquire session slot
+                slot_id = self.db.acquire_session_slot(item['tier'], item['user_id'])
+                
+                if not slot_id:
+                    logger.warning(f"No available slot for tier {item['tier']}")
+                    continue
+                
+                # Update status to processing
+                self.db.update_queue_status(item['queue_id'], 'processing', slot_id)
+                self.db.log_system_activity('backend', f'Started processing {item["queue_id"]}', 'info', item['queue_id'])
+                
+                # Perform sentiment analysis
+                result = self.analyzer.analyze_sentiment(
+                    item['input_text'], 
+                    item['method']
+                )
+                
+                # Save result
+                self.db.insert_result(
+                    queue_id=item['queue_id'],
+                    sentiment_label=result['sentiment_label'],
+                    confidence_score=result['confidence_score'],
+                    json_result=result,
+                    processed_by=f"Streamlit_{item['method']}"
+                )
+                
+                # Update queue status to done
+                self.db.update_queue_status(item['queue_id'], 'done')
+                
+                # Release session slot
+                self.db.release_session_slot(slot_id)
+                
+                self.db.log_system_activity('backend', f'Completed processing {item["queue_id"]}', 'info', item['queue_id'])
+                processed_count += 1
+                
+                logger.info(f"Successfully processed {item['queue_id']}")
+                
+            except Exception as e:
+                logger.error(f"Failed to process {item['queue_id']}: {e}")
+                self.db.update_queue_status(item['queue_id'], 'error')
+                self.db.log_system_activity('backend', f'Error processing {item["queue_id"]}: {str(e)}', 'error', item['queue_id'])
+        
+        return processed_count
 def main():
     st.set_page_config(
         page_title="Sentil Backend Processor",
