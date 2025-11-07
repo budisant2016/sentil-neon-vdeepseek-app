@@ -13,7 +13,8 @@ if src_path not in sys.path:
 
 try:
     from database_manager import DatabaseManager
-    from sentiment_analyzer import SentimentAnalyzer
+    #from sentiment_analyzer import SentimentAnalyzer
+    from sentiment_analyzer import BilingualSentimentAnalyzer
     from config import db_config, app_config
 except ImportError as e:
     st.error(f"Import error: {e}")
@@ -29,7 +30,8 @@ logger = logging.getLogger(__name__)
 class SentilBackend:
     def __init__(self):
         self.db = DatabaseManager()
-        self.analyzer = SentimentAnalyzer()
+        #self.analyzer = SentimentAnalyzer()
+        self.analyzer = BilingualSentimentAnalyzer()
         self.processing_batch_size = app_config.processing_batch_size
         
         # Test connection
