@@ -2,205 +2,138 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
-import joblib
 import re
-import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from textblob import TextBlob
 import logging
-
-# Download NLTK data (cached)
-try:
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-except:
-    pass
 
 logger = logging.getLogger(__name__)
 
 class BilingualSentimentAnalyzer:
     def __init__(self):
-        self.vectorizers = {
-            'english': TfidfVectorizer(max_features=1000, stop_words='english'),  # Reduced features
-            'indonesian': TfidfVectorizer(max_features=1000)
-        }
-        
-        # Gunakan hanya NaiveBayes untuk faster training
-        self.models = {
-            'english': {
-                'NaiveBayes': MultinomialNB(),
-                # 'KNN': KNeighborsClassifier(n_neighbors=3),  # Simplified untuk performance
-                # 'RandomForest': RandomForestClassifier(n_estimators=50),  # Reduced trees
-            },
-            'indonesian': {
-                'NaiveBayes': MultinomialNB(),
-                # 'KNN': KNeighborsClassifier(n_neighbors=3),
-                # 'RandomForest': RandomForestClassifier(n_estimators=50),
-            }
-        }
-        
-        # Indonesian stopwords manual (simplified)
-        self.indonesian_stopwords = {
-            'yang', 'dan', 'di', 'ke', 'dari', 'untuk', 'dengan', 'ini', 'itu', 
-            'tidak', 'aku', 'kamu', 'kami', 'mereka', 'adalah', 'ada', 'sudah', 
-            'akan', 'telah', 'pada', 'juga', 'dalam', 'bahwa', 'atau', 'juga'
-        }
-        
+        # Jangan train model di __init__ - ini penyebab hang!
+        self.vectorizers = {}
+        self.models = {}
         self.is_trained = False
-        self._setup_minimal_training_data()  # Fast training data
-    
-    def _setup_minimal_training_data(self):
-        """Setup minimal training data for quick startup"""
+        self.training_data_setup = False
         
-        # Minimal English training data (6 samples each)
+        # Setup training data (cepat, tanpa training)
+        self._setup_training_data()
+    
+    def _setup_training_data(self):
+        """Setup training data tanpa training models"""
+        if self.training_data_setup:
+            return
+            
+        # Minimal training data
         self.english_texts = [
-            # Positive
-            "I love this product!", "Excellent quality!", "Very satisfied!",
-            # Negative
+            "I love this product!", "Excellent!", "Very satisfied!",
             "Terrible product!", "Very disappointed!", "Poor quality!",
-            # Neutral  
-            "It's okay.", "Average product.", "Not bad not good."
+            "It's okay.", "Average.", "Not bad not good."
         ]
         
         self.english_labels = ['positive', 'positive', 'positive', 
                               'negative', 'negative', 'negative',
                               'neutral', 'neutral', 'neutral']
         
-        # Minimal Indonesian training data
         self.indonesian_texts = [
-            # Positive
-            "Saya suka produk ini!", "Kualitas bagus!", "Sangat puas!",
-            # Negative
+            "Saya suka produk ini!", "Bagus!", "Sangat puas!",
             "Produk jelek!", "Sangat kecewa!", "Kualitas buruk!",
-            # Neutral
-            "Lumayanlah.", "Biasa saja.", "Tidak jelek tidak bagus."
+            "Lumayanlah.", "Biasa saja.", "Cukup baik."
         ]
         
         self.indonesian_labels = ['positive', 'positive', 'positive',
                                  'negative', 'negative', 'negative', 
                                  'neutral', 'neutral', 'neutral']
         
-        # Train models immediately
-        self._train_fast_models()
+        self.training_data_setup = True
     
-    def _train_fast_models(self):
-        """Fast training dengan minimal data"""
+    def _ensure_models_trained(self):
+        """Train models hanya ketika pertama kali dibutuhkan"""
+        if self.is_trained:
+            return
+            
+        logger.info("Training models...")
+        
         try:
-            # Train English models
-            processed_english = [self._preprocess_english_fast(text) for text in self.english_texts]
+            # English models
+            self.vectorizers['english'] = TfidfVectorizer(max_features=500, stop_words='english')
+            processed_english = [self._preprocess_text(text, 'english') for text in self.english_texts]
             X_en = self.vectorizers['english'].fit_transform(processed_english)
-            y_en = self.english_labels
             
-            for name, model in self.models['english'].items():
-                model.fit(X_en, y_en)
-                logger.info(f"✅ English model {name} trained")
+            self.models['english'] = {
+                'NaiveBayes': MultinomialNB().fit(X_en, self.english_labels)
+            }
             
-            # Train Indonesian models
-            processed_indonesian = [self._preprocess_indonesian_fast(text) for text in self.indonesian_texts]
+            # Indonesian models  
+            self.vectorizers['indonesian'] = TfidfVectorizer(max_features=500)
+            processed_indonesian = [self._preprocess_text(text, 'indonesian') for text in self.indonesian_texts]
             X_id = self.vectorizers['indonesian'].fit_transform(processed_indonesian)
-            y_id = self.indonesian_labels
             
-            for name, model in self.models['indonesian'].items():
-                model.fit(X_id, y_id)
-                logger.info(f"✅ Indonesian model {name} trained")
+            self.models['indonesian'] = {
+                'NaiveBayes': MultinomialNB().fit(X_id, self.indonesian_labels)
+            }
             
             self.is_trained = True
-            logger.info("🎯 All models trained successfully")
+            logger.info("Models trained successfully")
             
         except Exception as e:
-            logger.error(f"❌ Model training failed: {e}")
-            # Fallback: tetap set is_trained untuk avoid infinite loop
+            logger.error(f"Model training failed: {e}")
+            # Fallback: set trained anyway untuk avoid infinite loop
             self.is_trained = True
     
-    def _preprocess_english_fast(self, text):
-        """Fast English preprocessing"""
+    def _preprocess_text(self, text, language):
+        """Simple text preprocessing"""
         text = str(text).lower()
         text = re.sub(r'[^a-zA-Z\s]', '', text)
         return text
     
-    def _preprocess_indonesian_fast(self, text):
-        """Fast Indonesian preprocessing"""
-        text = str(text).lower()
-        text = re.sub(r'[^a-zA-Z\s]', '', text)
-        return text
-    
-    def detect_language(self, text: str) -> str:
+    def detect_language(self, text):
         """Fast language detection"""
         text_lower = text.lower()
-        
-        # Simple keyword detection
-        indo_words = ['yang', 'dan', 'di', 'ke', 'dari', 'untuk', 'dengan', 'ini', 'itu']
-        english_words = ['the', 'and', 'to', 'of', 'a', 'in', 'is', 'it', 'you']
+        indo_words = ['yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'saya', 'aku']
+        english_words = ['the', 'and', 'to', 'of', 'a', 'in', 'is', 'it', 'you', 'i']
         
         id_count = sum(1 for word in indo_words if word in text_lower)
         en_count = sum(1 for word in english_words if word in text_lower)
         
         return 'indonesian' if id_count > en_count else 'english'
     
-    def analyze_sentiment(self, text: str, method: str = 'NaiveBayes', language: str = 'auto') -> dict:
-        """Fast sentiment analysis"""
+    def analyze_sentiment(self, text, method='NaiveBayes', language='auto'):
+        """Analyze sentiment dengan lazy loading"""
         try:
-            # Auto-detect language if not specified
+            # Train models hanya ketika pertama kali dipanggil
+            self._ensure_models_trained()
+            
+            # Detect language
             if language == 'auto':
                 detected_lang = self.detect_language(text)
             else:
                 detected_lang = language
             
-            # Ensure we have a valid method
-            if method not in self.models[detected_lang]:
-                method = 'NaiveBayes'  # Fallback to NaiveBayes
+            # Fallback ke NaiveBayes jika method tidak tersedia
+            if method not in self.models.get(detected_lang, {}):
+                method = 'NaiveBayes'
             
-            # Preprocess based on language
-            if detected_lang == 'english':
-                processed_text = self._preprocess_english_fast(text)
-                vectorizer = self.vectorizers['english']
-                model = self.models['english'][method]
-            else:
-                processed_text = self._preprocess_indonesian_fast(text)
-                vectorizer = self.vectorizers['indonesian']
-                model = self.models['indonesian'][method]
+            # Preprocess dan predict
+            processed_text = self._preprocess_text(text, detected_lang)
+            vectorizer = self.vectorizers[detected_lang]
+            model = self.models[detected_lang][method]
             
-            # Vectorize and predict
             X = vectorizer.transform([processed_text])
             prediction = model.predict(X)[0]
             probabilities = model.predict_proba(X)[0]
             confidence = max(probabilities)
             
-            # Simple polarity estimation
-            positive_words = ['love', 'good', 'great', 'excellent', 'suka', 'bagus', 'puas', 'senang']
-            negative_words = ['terrible', 'bad', 'poor', 'disappointed', 'jelek', 'buruk', 'kecewa']
-            
-            text_lower = text.lower()
-            positive_count = sum(1 for word in positive_words if word in text_lower)
-            negative_count = sum(1 for word in negative_words if word in text_lower)
-            
-            if positive_count > negative_count:
-                polarity = 0.5
-            elif negative_count > positive_count:
-                polarity = -0.5
-            else:
-                polarity = 0.0
-            
-            result = {
+            return {
                 'sentiment_label': prediction,
                 'confidence_score': float(confidence),
                 'method_used': method,
                 'language_detected': detected_lang,
-                'polarity': round(polarity, 3),
                 'processed_text': processed_text,
                 'timestamp': pd.Timestamp.now().isoformat()
             }
             
-            logger.info(f"✅ Analysis complete: {prediction}")
-            return result
-            
         except Exception as e:
-            logger.error(f"❌ Analysis failed: {e}")
-            # Return fallback result
+            logger.error(f"Analysis error: {e}")
             return {
                 'sentiment_label': 'neutral',
                 'confidence_score': 0.5,
