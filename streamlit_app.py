@@ -36,7 +36,7 @@ class SentilBackend:
             raise Exception("Database connection failed")
     
     def process_queue(self):
-"""Main method to process queued items"""
+    #"""Main method to process queued items"""
         logger.info("Starting queue processing...")
         
         # Get queued items
