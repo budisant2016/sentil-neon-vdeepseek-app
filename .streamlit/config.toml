@@ -6,6 +6,9 @@ port = 8501
 [browser]
 gatherUsageStats = false
 
+[server]
+fileWatcherType = "none"  # ⬅️ ADD THIS LINE
+
 [theme]
 primaryColor = "#FF4B4B"
 backgroundColor = "#FFFFFF"
