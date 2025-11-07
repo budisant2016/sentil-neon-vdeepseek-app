@@ -5,18 +5,19 @@ import sys
 import os
 from datetime import datetime
 
-# Add src to Python path untuk Streamlit Cloud
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# Fix import path untuk Streamlit Cloud
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_path = os.path.join(current_dir, 'src')
+if src_path not in sys.path:
+    sys.path.append(src_path)
 
 try:
-    from src.database_manager import DatabaseManager
-    from src.sentiment_analyzer import SentimentAnalyzer
-    from src.config import db_config, app_config
-except ImportError:
-    # Fallback untuk development lokal
     from database_manager import DatabaseManager
     from sentiment_analyzer import SentimentAnalyzer
     from config import db_config, app_config
+except ImportError as e:
+    st.error(f"Import error: {e}")
+    st.stop()
 
 # Setup logging
 logging.basicConfig(
@@ -36,27 +37,26 @@ class SentilBackend:
             raise Exception("Database connection failed")
     
     def process_queue(self):
-    #"""Main method to process queued items"""
-        logger.info("Starting queue processing...")
+        """Main method to process queued items"""
+        logger.info("🔄 Starting queue processing...")
         
-        # Get queued items
         queued_items = self.db.get_queued_items(self.processing_batch_size)
         
         if not queued_items:
-            logger.info("No items in queue")
+            logger.info("ℹ️ No items in queue")
             return 0
         
         processed_count = 0
         
         for item in queued_items:
             try:
-                logger.info(f"Processing item {item['queue_id']} for user {item['user_id']}")
+                logger.info(f"📥 Processing item {item['queue_id']} for user {item['user_id']}")
                 
                 # Acquire session slot
                 slot_id = self.db.acquire_session_slot(item['tier'], item['user_id'])
                 
                 if not slot_id:
-                    logger.warning(f"No available slot for tier {item['tier']}")
+                    logger.warning(f"⚠️ No available slot for tier {item['tier']}")
                     continue
                 
                 # Update status to processing
@@ -80,21 +80,20 @@ class SentilBackend:
                 
                 # Update queue status to done
                 self.db.update_queue_status(item['queue_id'], 'done')
-                
-                # Release session slot
                 self.db.release_session_slot(slot_id)
                 
                 self.db.log_system_activity('backend', f'Completed processing {item["queue_id"]}', 'info', item['queue_id'])
                 processed_count += 1
                 
-                logger.info(f"Successfully processed {item['queue_id']}")
+                logger.info(f"✅ Successfully processed {item['queue_id']}")
                 
             except Exception as e:
-                logger.error(f"Failed to process {item['queue_id']}: {e}")
+                logger.error(f"❌ Failed to process {item['queue_id']}: {e}")
                 self.db.update_queue_status(item['queue_id'], 'error')
                 self.db.log_system_activity('backend', f'Error processing {item["queue_id"]}: {str(e)}', 'error', item['queue_id'])
         
         return processed_count
+
 def main():
     st.set_page_config(
         page_title="Sentil Backend Processor",
