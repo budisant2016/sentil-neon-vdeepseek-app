@@ -261,6 +261,98 @@ def render_auto_processing(backend):
                     break
             
             time.sleep(processing_interval)
+def show_test_section(backend):
+    """Show test section dengan timeout handling"""
+    if not st.session_state.show_test:
+        return
+    
+    st.subheader("Test Analysis")
+    
+    test_text = st.text_area("Text to analyze:", st.session_state.test_text)
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        method = st.selectbox("Method", ['NaiveBayes'])  # Hanya NaiveBayes untuk sekarang
+    with col2:
+        language = st.selectbox("Language", ['auto', 'english', 'indonesian'])
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Analyze", type="primary"):
+            # Create progress bar dan status
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                status_text.text("Initializing analyzer...")
+                progress_bar.progress(20)
+                
+                status_text.text("Processing text...")
+                progress_bar.progress(50)
+                
+                # Analysis dengan timeout handling
+                import threading
+                from queue import Queue
+                
+                result_queue = Queue()
+                
+                def analyze_with_timeout():
+                    try:
+                        result = backend.analyzer.analyze_sentiment(test_text, method, language)
+                        result_queue.put(('success', result))
+                    except Exception as e:
+                        result_queue.put(('error', str(e)))
+                
+                # Jalankan di thread terpisah
+                analysis_thread = threading.Thread(target=analyze_with_timeout)
+                analysis_thread.daemon = True
+                analysis_thread.start()
+                
+                status_text.text("Analyzing sentiment...")
+                progress_bar.progress(80)
+                
+                # Tunggu maksimal 10 detik
+                analysis_thread.join(timeout=10)
+                
+                if analysis_thread.is_alive():
+                    # Timeout occurred
+                    status_text.text("Analysis taking too long...")
+                    progress_bar.progress(100)
+                    st.error("❌ Analysis timeout. Please try with shorter text.")
+                else:
+                    # Get result
+                    if not result_queue.empty():
+                        result_type, data = result_queue.get()
+                        
+                        if result_type == 'success':
+                            status_text.text("Complete!")
+                            progress_bar.progress(100)
+                            
+                            st.success("Analysis Complete!")
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                sentiment_emoji = "😊" if data['sentiment_label'] == 'positive' else "😞" if data['sentiment_label'] == 'negative' else "😐"
+                                st.metric("Sentiment", f"{sentiment_emoji} {data['sentiment_label']}")
+                            with col2:
+                                st.metric("Confidence", f"{data['confidence_score']:.1%}")
+                            with col3:
+                                lang_flag = "🇺🇸" if data['language_detected'] == 'english' else "🇮🇩"
+                                st.metric("Language", f"{lang_flag} {data['language_detected']}")
+                            
+                            with st.expander("Details"):
+                                st.json(data)
+                        else:
+                            st.error(f"Error: {data}")
+                    else:
+                        st.error("No result returned")
+                        
+            except Exception as e:
+                st.error(f"Analysis failed: {e}")
+    
+    with col2:
+        if st.button("Close"):
+            st.session_state.show_test = False
+            st.rerun()
 
 def main():
     st.set_page_config(
