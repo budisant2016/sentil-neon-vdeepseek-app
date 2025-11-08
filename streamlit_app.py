@@ -267,6 +267,208 @@ def show_analysis_results(result, analysis_time, original_text):
             st.write(f"**Used Method:** {result['method_used']}")
             st.write(f"**Language Detected:** {result['language_detected']}")
 
+def show_batch_analysis_section(backend):
+    """Show batch analysis input form"""
+    st.subheader("📚 Batch Text Analysis")
+    
+    with st.form("batch_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Batch Input**")
+            batch_texts = st.text_area(
+                "Enter texts (one per line):",
+                placeholder="I love this product!\nThis is terrible!\nIt's okay...",
+                height=200,
+                help="Enter one text per line. Maximum texts based on your tier."
+            )
+            
+            # Parse texts
+            texts = [text.strip() for text in batch_texts.split('\n') if text.strip()]
+            text_count = len(texts)
+            
+            st.write(f"📊 Texts detected: {text_count}")
+        
+        with col2:
+            st.write("**Analysis Settings**")
+            user_tier = st.selectbox(
+                "Your Tier:",
+                options=[1, 2, 3],
+                index=0,
+                format_func=lambda x: f"Tier {x} - {'Guest (10 max)' if x == 1 else 'Registered (30 max)' if x == 2 else 'Premium (100 max)'}"
+            )
+            
+            method = st.selectbox(
+                "Analysis Method:",
+                options=['NaiveBayes', 'KNN', 'RandomForest', 'SVM']
+            )
+            
+            language = st.selectbox(
+                "Language:",
+                options=['auto', 'english', 'indonesian']
+            )
+            
+            # Show tier limits
+            tier_limits = {1: 10, 2: 30, 3: 100}
+            max_limit = tier_limits[user_tier]
+            
+            if text_count > 0:
+                if text_count > max_limit:
+                    st.error(f"❌ Tier {user_tier} limit exceeded: {text_count}/{max_limit} texts")
+                else:
+                    st.success(f"✅ Within tier limit: {text_count}/{max_limit} texts")
+        
+        submitted = st.form_submit_button("🚀 Submit Batch Analysis", type="primary")
+        
+        if submitted:
+            if not texts:
+                st.error("⚠️ Please enter some texts to analyze")
+                return
+                
+            # Validate batch limit
+            is_valid, message = backend.analyzer.validate_batch_limit(texts, user_tier)
+            
+            if not is_valid:
+                st.error(f"❌ {message}")
+                return
+            
+            # Insert to batch queue
+            success, result = backend.db.insert_batch_request(
+                user_id="batch_user",  # For demo
+                texts=texts,
+                method=method,
+                tier=user_tier,
+                language=language
+            )
+            
+            if success:
+                st.success(f"✅ Batch analysis submitted! Queue ID: {result}")
+                st.info("Click 'Process Queue' to analyze or enable auto-processing")
+                
+                # Show preview
+                with st.expander("📋 Batch Preview"):
+                    for i, text in enumerate(texts[:5]):  # Show first 5
+                        st.write(f"{i+1}. {text}")
+                    if len(texts) > 5:
+                        st.write(f"... and {len(texts) - 5} more texts")
+            else:
+                st.error(f"❌ Failed to submit batch: {result}")
+
+def show_batch_results(backend):
+    """Show batch results history"""
+    st.subheader("📈 Batch Results History")
+    
+    try:
+        # Get recent batch results
+        recent_batches = get_recent_batch_results(backend.db, limit=5)
+        
+        if recent_batches:
+            for batch in recent_batches:
+                with st.expander(f"📦 Batch: {batch['queue_id'][:8]}... ({batch['item_count']} texts)"):
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.write(f"**Tier:** {batch['tier']}")
+                    with col2:
+                        st.write(f"**Method:** {batch['method']}")
+                    with col3:
+                        st.write(f"**Status:** {batch['status']}")
+                    with col4:
+                        st.write(f"**Items:** {batch['item_count']}")
+                    
+                    # Show sample results
+                    if batch['results']:
+                        st.write("**Sample Results:**")
+                        for result in batch['results'][:3]:  # Show first 3
+                            sentiment_emoji = "😊" if result['sentiment_label'] == 'positive' else "😞" if result['sentiment_label'] == 'negative' else "😐"
+                            st.write(f"{sentiment_emoji} `{result['text'][:50]}...` → {result['sentiment_label']} ({result['confidence_score']:.0%})")
+                        
+                        if len(batch['results']) > 3:
+                            st.write(f"... and {len(batch['results']) - 3} more results")
+        else:
+            st.info("No batch analysis results yet. Submit some batch requests first!")
+            
+    except Exception as e:
+        st.info("Batch results history coming soon...")
+
+def get_recent_batch_results(db, limit=5):
+    """Get recent batch analysis results"""
+    # This would need proper implementation in database_manager
+    return []
+
+def update_process_queue_method(backend):
+    """Update process_queue to handle batch items"""
+    def process_queue():
+        """Process both single and batch queue items"""
+        try:
+            queued_items = backend.db.get_queued_items(backend.batch_size)
+            
+            if not queued_items:
+                return 0
+            
+            processed_count = 0
+            for item in queued_items:
+                try:
+                    slot_id = backend.db.acquire_session_slot(item['tier'], item['user_id'])
+                    if not slot_id:
+                        continue
+                    
+                    backend.db.update_queue_status(item['queue_id'], 'processing', slot_id)
+                    
+                    if item.get('is_batch', False):
+                        # Process batch item
+                        success = backend.db.process_batch_queue_item(item['queue_id'], backend.analyzer)
+                        if success:
+                            processed_count += item.get('item_count', 1)
+                    else:
+                        # Process single item
+                        result = backend.analyzer.analyze_sentiment(
+                            item['input_text'], 
+                            item.get('method', 'NaiveBayes'),
+                            language='auto'
+                        )
+                        
+                        backend.db.insert_result(
+                            queue_id=item['queue_id'],
+                            sentiment_label=result['sentiment_label'],
+                            confidence_score=result['confidence_score'],
+                            json_result=result,
+                            processed_by=f"Streamlit_{result['method_used']}_{result['language_detected']}"
+                        )
+                        
+                        backend.db.update_queue_status(item['queue_id'], 'done')
+                        processed_count += 1
+                    
+                    backend.db.release_session_slot(slot_id)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process {item['queue_id']}: {e}")
+                    backend.db.update_queue_status(item['queue_id'], 'error')
+            
+            return processed_count
+            
+        except Exception as e:
+            logger.error(f"Queue processing error: {e}")
+            return 0
+    
+    return process_queue
+
+# Update the backend class
+class SentilBackend:
+    def __init__(self):
+        self.db = DatabaseManager()
+        self.analyzer = BilingualSentimentAnalyzer()
+        self.batch_size = app_config.processing_batch_size
+        
+        # Override process_queue method
+        self.process_queue = update_process_queue_method(self)
+        
+        # Quick connection test
+        try:
+            if not self.db.test_connection():
+                logger.warning("Database connection test failed")
+        except:
+            logger.warning("Database connection test skipped")
+
 def main():
     """Main app function"""
     st.set_page_config(
