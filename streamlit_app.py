@@ -270,13 +270,13 @@ def show_analysis_results(result, analysis_time, original_text):
 def main():
     """Main app function"""
     st.set_page_config(
-        page_title="Sentil - Multi-Method Analyzer",
+        page_title="Sentil - Batch Analyzer", 
         page_icon="🤖",
         layout="wide"
     )
     
     st.title("🤖 Sentil Multi-Method Sentiment Analyzer")
-    st.markdown("**Naive Bayes • KNN • Random Forest • SVM** - Bilingual Analysis")
+    st.markdown("**Single & Batch Analysis** | Tier-based Limits")
     
     # Initialize
     if not init_session_state():
@@ -287,64 +287,35 @@ def main():
     # Sidebar
     show_sidebar(backend)
     
-    # Quick actions
-    st.subheader("🚀 Quick Actions")
+    # Main tabs
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🚀 Quick Actions", 
+        "📝 Single Analysis", 
+        "📚 Batch Analysis", 
+        "📊 Queue Status", 
+        "🧪 Test Analysis"
+    ])
     
-    col1, col2, col3, col4 = st.columns(4)
+    with tab1:
+        show_quick_actions(backend)
     
-    with col1:
-        if st.button("🔄 Process Queue", type="primary", use_container_width=True):
-            with st.spinner("Processing queue..."):
-                count = backend.process_queue()
-                if count > 0:
-                    st.success(f"✅ Processed {count} items")
-                else:
-                    st.info("📭 No items in queue")
+    with tab2:
+        show_input_form(backend)  # Existing single analysis form
     
-    with col2:
-        if st.button("📊 Queue Status", use_container_width=True):
-            try:
-                items = backend.db.get_queued_items(5)
-                st.info(f"📋 Queued items: {len(items)}")
-                if items:
-                    for item in items:
-                        st.write(f"- `{item['method']}`: {item['input_text'][:30]}...")
-            except Exception as e:
-                st.error(f"❌ Failed: {e}")
+    with tab3:
+        show_batch_analysis_section(backend)
+        show_batch_results(backend)
     
-    with col3:
-        if st.button("🧪 Test Analysis", type="secondary", use_container_width=True):
-            st.session_state.show_test = True
-            st.rerun()
+    with tab4:
+        show_queue_status(backend)
+        show_results_history(backend)
     
-    with col4:
-        if st.button("🆕 New Analysis", use_container_width=True):
-            st.session_state.test_text = ""
-            st.session_state.show_test = True
-            st.rerun()
-    
-    # Test section
-    show_test_section(backend)
-    
-    # Methods overview
-    st.markdown("---")
-    st.subheader("🔬 Supported Methods Overview")
-    
-    methods_cols = st.columns(4)
-    methods_info = [
-        ("Naive Bayes", "Statistical method based on Bayes theorem", "🎯"),
-        ("K-Nearest Neighbors", "Instance-based learning", "📈"),
-        ("Random Forest", "Ensemble of decision trees", "🌳"),
-        ("Support Vector Machine", "Maximizes margin between classes", "⚡")
-    ]
-    
-    for idx, (name, desc, icon) in enumerate(methods_info):
-        with methods_cols[idx]:
-            st.metric(f"{icon} {name}", desc)
+    with tab5:
+        show_test_section(backend)
     
     # Footer
     st.markdown("---")
-    st.caption("Sentil v1.0 | Multi-Method Bilingual Sentiment Analysis | Streamlit + Neon DB")
+    st.caption("Sentil v1.0 | Single & Batch Analysis | Tier 1:10 texts, Tier 2:30 texts, Tier 3:100 texts")
 
 if __name__ == "__main__":
     main()
