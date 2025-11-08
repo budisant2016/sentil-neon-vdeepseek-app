@@ -267,6 +267,98 @@ class DatabaseManager:
         except Exception as e:
             return {'error': str(e)}
 
+def insert_batch_request(self, user_id: str, texts: list, method: str = 'NaiveBayes', 
+                        tier: int = 1, language: str = 'auto') -> tuple:
+    """Insert batch analysis request ke input_queue"""
+    try:
+        with self.get_session() as session:
+            from src.models import InputQueue
+            import uuid
+            import json
+            
+            # Validate input
+            if not texts or len(texts) == 0:
+                return False, "No texts provided"
+            
+            # Create batch queue item
+            queue_item = InputQueue(
+                user_id=uuid.uuid4(),  # For demo, use random UUID
+                input_text=f"Batch analysis: {len(texts)} texts",  # Summary
+                method=method,
+                tier=tier,
+                status='queued',
+                is_batch=True,
+                batch_data=json.dumps(texts),  # Store all texts as JSON
+                item_count=len(texts)
+            )
+            
+            session.add(queue_item)
+            session.commit()
+            
+            # Log the activity
+            self.log_system_activity(
+                source='frontend', 
+                message=f'Batch analysis request submitted: {len(texts)} texts (Tier {tier})',
+                level='info',
+                related_id=queue_item.queue_id
+            )
+            
+            return True, queue_item.queue_id
+            
+    except Exception as e:
+        logger.error(f"Failed to insert batch request: {e}")
+        return False, str(e)
+
+def process_batch_queue_item(self, queue_id: str, analyzer) -> bool:
+    """Process batch queue item"""
+    try:
+        with self.get_session() as session:
+            from src.models import InputQueue, OutputResult
+            import json
+            
+            # Get the batch queue item
+            queue_item = session.get(InputQueue, queue_id)
+            if not queue_item or not queue_item.is_batch:
+                return False
+            
+            # Parse batch data
+            texts = json.loads(queue_item.batch_data)
+            
+            # Perform batch analysis
+            results = analyzer.analyze_sentiment_batch(
+                texts, 
+                queue_item.method,
+                language='auto'
+            )
+            
+            # Save each result individually
+            for result in results:
+                output_result = OutputResult(
+                    queue_id=queue_id,
+                    sentiment_label=result['sentiment_label'],
+                    confidence_score=result['confidence_score'],
+                    json_result=result,
+                    processed_by=f"Streamlit_Batch_{queue_item.method}"
+                )
+                session.add(output_result)
+            
+            # Update queue status
+            queue_item.status = 'done'
+            session.commit()
+            
+            logger.info(f"✅ Batch processing complete: {len(results)} items")
+            return True
+            
+    except Exception as e:
+        logger.error(f"❌ Batch processing failed: {e}")
+        with self.get_session() as session:
+            queue_item = session.get(InputQueue, queue_id)
+            if queue_item:
+                queue_item.status = 'error'
+                session.commit()
+        return False
+
+
 def insert_result(self, queue_id: str, sentiment_label: str, 
                  confidence_score: float, json_result: dict, processed_by: str):
     """Insert analysis result"""
