@@ -176,7 +176,7 @@ class DatabaseManager:
                         .where(SessionSlot.slot_id == slot)
                         .values(
                             is_active=True,
-                            current_user=user_id,
+                            current_user_id=user_id,  # ⬅️ FIX: ganti nama
                             started_at=func.now(),
                             expires_at=func.now() + text("INTERVAL '30 minutes'")
                         )
