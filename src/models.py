@@ -34,6 +34,11 @@ class InputQueue(Base):
     slot_id = Column(Integer, ForeignKey('session_slots.slot_id'))
     timestamp_in = Column(DateTime(timezone=True), server_default=func.now())
     last_update = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Batch analysis fields
+    is_batch = Column(Boolean, default=False)
+    batch_data = Column(JSONB)  # Store multiple texts as JSON array
+    item_count = Column(Integer, default=1)
 
 class OutputResult(Base):
     __tablename__ = 'output_results'
