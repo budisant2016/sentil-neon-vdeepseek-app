@@ -11,6 +11,93 @@ import logging
 logger = logging.getLogger(__name__)
 
 class BilingualSentimentAnalyzer:
+
+    def analyze_sentiment_batch(self, texts: list, method: str = 'NaiveBayes', language: str = 'auto') -> list:
+        """Analyze multiple texts in batch"""
+        try:
+            if not texts:
+                return []
+            
+            # Auto-detect language from first text
+            if language == 'auto':
+                detected_lang = self.detect_language(texts[0])
+            else:
+                detected_lang = language
+            
+            # Train models untuk bahasa ini jika belum
+            self._ensure_models_trained(detected_lang)
+            
+            # Validasi method
+            available_methods = self.get_available_methods(detected_lang)
+            if method not in available_methods:
+                method = available_methods[0]
+            
+            # Preprocess semua texts
+            processed_texts = [self._preprocess_text(text, detected_lang) for text in texts]
+            vectorizer = self.vectorizers[detected_lang]
+            model = self.models[detected_lang][method]
+            
+            # Vectorize dan predict dalam batch
+            X = vectorizer.transform(processed_texts)
+            predictions = model.predict(X)
+            
+            results = []
+            for i, (text, prediction) in enumerate(zip(texts, predictions)):
+                # Confidence score
+                if hasattr(model, 'predict_proba'):
+                    probabilities = model.predict_proba(X[i:i+1])[0]
+                    confidence = max(probabilities)
+                else:
+                    confidence = 0.7
+                
+                result = {
+                    'text': text,
+                    'sentiment_label': prediction,
+                    'confidence_score': float(confidence),
+                    'method_used': method,
+                    'language_detected': detected_lang,
+                    'processed_text': processed_texts[i],
+                    'item_index': i,
+                    'timestamp': pd.Timestamp.now().isoformat()
+                }
+                results.append(result)
+            
+            logger.info(f"✅ Batch analysis complete: {len(results)} items processed")
+            return results
+            
+        except Exception as e:
+            logger.error(f"❌ Batch analysis failed: {e}")
+            # Return fallback results
+            return [
+                {
+                    'text': text,
+                    'sentiment_label': 'neutral',
+                    'confidence_score': 0.5,
+                    'method_used': method,
+                    'language_detected': 'english',
+                    'error': str(e)
+                }
+                for text in texts
+            ]
+    
+    def validate_batch_limit(self, texts: list, tier: int) -> tuple:
+        """Validate batch size based on tier limits"""
+        text_count = len(texts)
+        
+        # Tier limits sesuai blueprint
+        tier_limits = {
+            1: 10,  # Guest: max 10 texts
+            2: 30,  # Registered: max 30 texts  
+            3: 100  # Premium: max 100 texts
+        }
+        
+        max_limit = tier_limits.get(tier, 10)
+        
+        if text_count > max_limit:
+            return False, f"Tier {tier} limited to {max_limit} texts. You submitted {text_count} texts."
+        
+        return True, f"Batch validation passed: {text_count} texts within tier {tier} limit ({max_limit})"
+    
     def __init__(self):
         # Jangan train model di __init__
         self.vectorizers = {}
